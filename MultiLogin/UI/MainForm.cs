@@ -19,7 +19,7 @@ public class MainForm : Form
     public MainForm()
     {
         Text = "Multi Login";
-        Width = 1100;
+        Width = 1250;
         Height = 650;
         StartPosition = FormStartPosition.CenterScreen;
         Font = new Font("Segoe UI", 9.5f);
@@ -56,8 +56,9 @@ public class MainForm : Form
         _list.Columns.Add("Status", 90);
         _list.Columns.Add("Name", 220);
         _list.Columns.Add("Tags", 140);
-        _list.Columns.Add("Proxy", 240);
-        _list.Columns.Add("Notes", 240);
+        _list.Columns.Add("Proxy", 220);
+        _list.Columns.Add("Fingerprint", 150);
+        _list.Columns.Add("Notes", 200);
         _list.Columns.Add("Last launched", 140);
         _list.DoubleClick += (_, _) => LaunchSelected();
         _list.SelectedIndexChanged += (_, _) => UpdateButtons();
@@ -133,6 +134,9 @@ public class MainForm : Form
             item.SubItems.Add(p.Name);
             item.SubItems.Add(p.Tags);
             item.SubItems.Add(p.ProxyDisplay);
+            item.SubItems.Add(p.Fingerprint.Enabled
+                ? $"{p.Fingerprint.Platform} · {p.Fingerprint.ScreenWidth}×{p.Fingerprint.ScreenHeight}"
+                : "Off");
             item.SubItems.Add(p.Notes.Replace("\r", " ").Replace("\n", " "));
             item.SubItems.Add(p.LastLaunchedUtc?.ToLocalTime().ToString("g") ?? "Never");
             if (running) item.ForeColor = Color.SeaGreen;
@@ -220,14 +224,22 @@ public class MainForm : Form
         RefreshList();
     }
 
-    private void LaunchSelected()
+    private async void LaunchSelected()
     {
-        foreach (var p in SelectedProfiles.Where(p => !_launcher.IsRunning(p.Id)))
-        {
-            try { _launcher.Launch(p); }
-            catch (Exception ex) { ShowError(ex.Message); }
-        }
+        var toLaunch = SelectedProfiles.Where(p => !_launcher.IsRunning(p.Id)).ToList();
+        if (toLaunch.Count == 0) return;
+
+        var launches = toLaunch.Select(LaunchOneAsync).ToList();
         RefreshList();
+        _status.Text = $"Launching {toLaunch.Count} profile(s)…";
+        await Task.WhenAll(launches);
+        RefreshList();
+    }
+
+    private async Task LaunchOneAsync(Profile profile)
+    {
+        try { await _launcher.LaunchAsync(profile); }
+        catch (Exception ex) { ShowError($"Couldn't launch \"{profile.Name}\":\n\n{ex.Message}"); }
     }
 
     private async Task StopSelected()

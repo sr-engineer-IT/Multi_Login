@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using MultiLogin.Models;
 
@@ -31,6 +31,10 @@ public class ProfileStore
     {
         Profiles = ReadJson<List<Profile>>(ProfilesFile) ?? new();
         Settings = ReadJson<AppSettings>(SettingsFile) ?? new();
+
+        // Profiles saved before fingerprints existed get one now.
+        foreach (var p in Profiles.Where(p => p.Fingerprint == null || p.Fingerprint.NoiseSeed == 0))
+            p.Fingerprint = Fingerprint.Generate(Fingerprint.Windows);
     }
 
     public void Save()

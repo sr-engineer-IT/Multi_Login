@@ -11,4 +11,8 @@
     <Product>Multi Login</Product>
   </PropertyGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Services\fingerprint.js" LogicalName="MultiLogin.fingerprint.js" />
+  </ItemGroup>
+
 </Project>

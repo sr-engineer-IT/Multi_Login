@@ -43,6 +43,8 @@ public class Profile
     /// <summary>Extra Chromium command-line switches, one per line.</summary>
     public string ExtraArgs { get; set; } = "";
 
+    public Fingerprint Fingerprint { get; set; } = Fingerprint.Generate(Fingerprint.Windows);
+
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public DateTime? LastLaunchedUtc { get; set; }
 
@@ -68,6 +70,15 @@ public class Profile
         copy.Name = Name + " (copy)";
         copy.CreatedUtc = DateTime.UtcNow;
         copy.LastLaunchedUtc = null;
+        // Same settings, but a fresh device identity so the two profiles can't be linked.
+        var fp = Fingerprint.Generate(Fingerprint.Platform);
+        fp.Enabled = Fingerprint.Enabled;
+        fp.Timezone = Fingerprint.Timezone;
+        fp.GeolocationFromIp = Fingerprint.GeolocationFromIp;
+        fp.CanvasNoise = Fingerprint.CanvasNoise;
+        fp.AudioNoise = Fingerprint.AudioNoise;
+        fp.WebGlSpoof = Fingerprint.WebGlSpoof;
+        copy.Fingerprint = fp;
         return copy;
     }
 }

@@ -6,7 +6,7 @@ namespace MultiLogin.UI;
 public class ProfileForm : Form
 {
     private readonly Profile _profile;
-    private readonly int _browserMajor;
+    private Fingerprint _fp;
 
     // General
     private readonly TextBox _name = new();
@@ -32,6 +32,37 @@ public class ProfileForm : Form
     private readonly CheckBox _blockWebRtc = new() { Text = "Block WebRTC from exposing the real IP", AutoSize = true };
     private readonly TextBox _extraArgs = Multiline(3);
 
+    // Fingerprint
+    private readonly CheckBox _fpEnabled = new() { Text = "Spoof this profile's device fingerprint", AutoSize = true };
+    private readonly ComboBox _fpPlatform = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 140 };
+    private readonly ComboBox _fpTimezone = new() { DropDownStyle = ComboBoxStyle.DropDown };
+    private readonly CheckBox _fpGeo = new() { Text = "Report the proxy IP's location to sites that ask for it", AutoSize = true };
+    private readonly ComboBox _fpCores = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
+    private readonly ComboBox _fpMemory = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
+    private readonly ComboBox _fpScreen = new() { DropDownStyle = ComboBoxStyle.DropDown, Width = 140 };
+    private readonly ComboBox _fpGpu = new() { DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly CheckBox _fpCanvas = new() { Text = "Canvas noise", AutoSize = true };
+    private readonly CheckBox _fpAudio = new() { Text = "Audio noise", AutoSize = true };
+    private readonly CheckBox _fpWebGl = new() { Text = "WebGL / WebGPU vendor", AutoSize = true };
+    private readonly List<Control> _fpControls = new();
+    private bool _loading;
+
+    private const string AutoTimezone = "Auto (from proxy IP)";
+    private static readonly string[] Timezones =
+    {
+        AutoTimezone,
+        "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "America/Phoenix",
+        "America/Anchorage", "America/Toronto", "America/Vancouver", "America/Mexico_City", "America/Sao_Paulo",
+        "America/Argentina/Buenos_Aires", "America/Bogota", "America/Lima", "Europe/London", "Europe/Dublin",
+        "Europe/Lisbon", "Europe/Paris", "Europe/Berlin", "Europe/Madrid", "Europe/Rome", "Europe/Amsterdam",
+        "Europe/Brussels", "Europe/Zurich", "Europe/Stockholm", "Europe/Warsaw", "Europe/Prague", "Europe/Vienna",
+        "Europe/Athens", "Europe/Bucharest", "Europe/Kyiv", "Europe/Istanbul", "Europe/Moscow", "Asia/Dubai",
+        "Asia/Karachi", "Asia/Kolkata", "Asia/Dhaka", "Asia/Bangkok", "Asia/Ho_Chi_Minh", "Asia/Jakarta",
+        "Asia/Singapore", "Asia/Kuala_Lumpur", "Asia/Manila", "Asia/Hong_Kong", "Asia/Shanghai", "Asia/Taipei",
+        "Asia/Seoul", "Asia/Tokyo", "Australia/Perth", "Australia/Sydney", "Australia/Melbourne",
+        "Pacific/Auckland", "Africa/Cairo", "Africa/Johannesburg", "Africa/Lagos", "Africa/Nairobi"
+    };
+
     private static readonly string[] Languages =
     {
         "", "en-US", "en-GB", "de-DE", "fr-FR", "es-ES", "it-IT", "pt-BR", "pt-PT", "nl-NL", "pl-PL",
@@ -41,18 +72,19 @@ public class ProfileForm : Form
     public ProfileForm(Profile profile, string? browserPath)
     {
         _profile = profile;
-        _browserMajor = browserPath != null ? UserAgents.GetMajorVersion(browserPath) : 140;
+        _fp = profile.Fingerprint.Copy();
 
         Text = $"Profile — {profile.Name}";
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = MinimizeBox = false;
         StartPosition = FormStartPosition.CenterParent;
-        ClientSize = new Size(640, 520);
+        ClientSize = new Size(680, 680);
         Font = new Font("Segoe UI", 9.5f);
 
         var tabs = new TabControl { Dock = DockStyle.Fill, Padding = new Point(14, 5) };
         tabs.TabPages.Add(BuildGeneralTab());
         tabs.TabPages.Add(BuildProxyTab());
+        tabs.TabPages.Add(BuildFingerprintTab());
         tabs.TabPages.Add(BuildBrowserTab());
 
         var ok = new Button { Text = "Save", DialogResult = DialogResult.OK, Width = 100, Height = 32 };
@@ -144,20 +176,145 @@ public class ProfileForm : Form
         return page;
     }
 
+    private TabPage BuildFingerprintTab()
+    {
+        _fpPlatform.Items.AddRange(Fingerprint.Platforms.Cast<object>().ToArray());
+        _fpPlatform.SelectedIndexChanged += (_, _) =>
+        {
+            if (_loading) return;
+            // Screen sizes and GPUs differ per platform, so re-roll them to stay consistent.
+            Randomize(keepSeed: true);
+        };
+        _fpTimezone.Items.AddRange(Timezones.Cast<object>().ToArray());
+        _fpCores.Items.AddRange(Fingerprint.CpuChoices.Cast<object>().ToArray());
+        _fpMemory.Items.AddRange(Fingerprint.MemoryChoices.Cast<object>().ToArray());
+        _fpEnabled.CheckedChanged += (_, _) => UpdateFingerprintEnabled();
+
+        var randomize = new Button { Text = "🎲  New random fingerprint", AutoSize = true };
+        randomize.Click += (_, _) => Randomize(keepSeed: false);
+
+        var hw = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+        hw.Controls.Add(new Label { Text = "CPU cores", AutoSize = true, Margin = new Padding(0, 7, 6, 0) });
+        hw.Controls.Add(_fpCores);
+        hw.Controls.Add(new Label { Text = "Memory (GB)", AutoSize = true, Margin = new Padding(16, 7, 6, 0) });
+        hw.Controls.Add(_fpMemory);
+
+        var noise = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+        noise.Controls.AddRange(new Control[] { _fpCanvas, _fpAudio, _fpWebGl });
+
+        var grid = NewGrid();
+        AddRow(grid, "", _fpEnabled);
+        AddRow(grid, "Platform", _fpPlatform, "Sets the user agent, client hints and navigator.platform to match.");
+        AddRow(grid, "Timezone", _fpTimezone, "Auto matches the proxy's IP. Without a proxy, your real timezone is kept.");
+        AddRow(grid, "Geolocation", _fpGeo);
+        AddRow(grid, "Hardware", hw);
+        AddRow(grid, "Screen", _fpScreen);
+        AddRow(grid, "GPU", _fpGpu);
+        AddRow(grid, "Protection", noise, "Noise makes Canvas/audio hashes unique per profile but stable across launches. " +
+                                          "It's done by script injection, which advanced anti-bot systems can sometimes detect.");
+        AddRow(grid, "", randomize);
+
+        _fpControls.AddRange(new Control[] { _fpPlatform, _fpTimezone, _fpGeo, hw, _fpScreen, _fpGpu, noise, randomize });
+
+        var page = new TabPage("Fingerprint");
+        page.Controls.Add(grid);
+        return page;
+    }
+
+    private void Randomize(bool keepSeed)
+    {
+        var platform = (string?)_fpPlatform.SelectedItem ?? Fingerprint.Windows;
+        var fresh = Fingerprint.Generate(platform);
+        ReadFingerprintControls();
+        _fp.Platform = platform;
+        _fp.HardwareConcurrency = fresh.HardwareConcurrency;
+        _fp.DeviceMemory = fresh.DeviceMemory;
+        _fp.ScreenWidth = fresh.ScreenWidth;
+        _fp.ScreenHeight = fresh.ScreenHeight;
+        _fp.WebGlVendor = fresh.WebGlVendor;
+        _fp.WebGlRenderer = fresh.WebGlRenderer;
+        if (!keepSeed) _fp.NoiseSeed = fresh.NoiseSeed;
+        LoadFingerprintControls();
+    }
+
+    private void LoadFingerprintControls()
+    {
+        _loading = true;
+        _fpEnabled.Checked = _fp.Enabled;
+        _fpPlatform.SelectedItem = Fingerprint.Platforms.Contains(_fp.Platform) ? _fp.Platform : Fingerprint.Windows;
+        _fpTimezone.Text = string.IsNullOrEmpty(_fp.Timezone) ? AutoTimezone : _fp.Timezone;
+        _fpGeo.Checked = _fp.GeolocationFromIp;
+        SelectOrAdd(_fpCores, _fp.HardwareConcurrency);
+        SelectOrAdd(_fpMemory, _fp.DeviceMemory);
+
+        _fpScreen.Items.Clear();
+        _fpScreen.Items.AddRange(Fingerprint.ScreensFor(_fp.Platform).Distinct().Select(s => (object)$"{s.W}×{s.H}").ToArray());
+        _fpScreen.Text = $"{_fp.ScreenWidth}×{_fp.ScreenHeight}";
+
+        _fpGpu.Items.Clear();
+        _fpGpu.Items.AddRange(Fingerprint.GpusFor(_fp.Platform).Select(g => (object)g.Renderer).ToArray());
+        if (!_fpGpu.Items.Contains(_fp.WebGlRenderer)) _fpGpu.Items.Add(_fp.WebGlRenderer);
+        _fpGpu.SelectedItem = _fp.WebGlRenderer;
+
+        _fpCanvas.Checked = _fp.CanvasNoise;
+        _fpAudio.Checked = _fp.AudioNoise;
+        _fpWebGl.Checked = _fp.WebGlSpoof;
+        _loading = false;
+        UpdateFingerprintEnabled();
+    }
+
+    private static void SelectOrAdd(ComboBox combo, int value)
+    {
+        if (!combo.Items.Contains(value)) combo.Items.Add(value);
+        combo.SelectedItem = value;
+    }
+
+    /// <summary>Copies the fingerprint controls into _fp. Returns an error message, or null.</summary>
+    private string? ReadFingerprintControls()
+    {
+        _fp.Enabled = _fpEnabled.Checked;
+        _fp.Platform = (string?)_fpPlatform.SelectedItem ?? Fingerprint.Windows;
+        var tz = _fpTimezone.Text.Trim();
+        _fp.Timezone = tz == AutoTimezone ? "" : tz;
+        _fp.GeolocationFromIp = _fpGeo.Checked;
+        if (_fpCores.SelectedItem is int cores) _fp.HardwareConcurrency = cores;
+        if (_fpMemory.SelectedItem is int mem) _fp.DeviceMemory = mem;
+
+        var screen = _fpScreen.Text.Split('×', 'x', 'X', '*');
+        if (screen.Length == 2 && int.TryParse(screen[0].Trim(), out var w) && int.TryParse(screen[1].Trim(), out var h)
+            && w >= 640 && h >= 480)
+            (_fp.ScreenWidth, _fp.ScreenHeight) = (w, h);
+        else if (_fp.Enabled)
+            return "Enter the screen size as width×height, e.g. 1920×1080.";
+
+        if (_fpGpu.SelectedItem is string renderer)
+        {
+            _fp.WebGlRenderer = renderer;
+            var known = Fingerprint.Platforms.SelectMany(Fingerprint.GpusFor).FirstOrDefault(g => g.Renderer == renderer);
+            if (known.Vendor != null) _fp.WebGlVendor = known.Vendor;
+        }
+        _fp.CanvasNoise = _fpCanvas.Checked;
+        _fp.AudioNoise = _fpAudio.Checked;
+        _fp.WebGlSpoof = _fpWebGl.Checked;
+
+        if (_fp.Enabled && _fp.Timezone.Length > 0 && !IsValidTimezone(_fp.Timezone))
+            return $"\"{_fp.Timezone}\" isn't a known timezone. Use an IANA name like Europe/Berlin, or Auto.";
+        return null;
+    }
+
+    private static bool IsValidTimezone(string iana)
+    {
+        try { TimeZoneInfo.FindSystemTimeZoneById(iana); return true; }
+        catch (TimeZoneNotFoundException) { return false; }
+    }
+
+    private void UpdateFingerprintEnabled()
+    {
+        foreach (var c in _fpControls) c.Enabled = _fpEnabled.Checked;
+    }
+
     private TabPage BuildBrowserTab()
     {
-        var uaButtons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
-        for (var i = 0; i < UserAgents.PlatformNames.Length; i++)
-        {
-            var index = i;
-            var b = new Button { Text = UserAgents.PlatformNames[i], AutoSize = true };
-            b.Click += (_, _) => _userAgent.Text = UserAgents.Build(index, _browserMajor);
-            uaButtons.Controls.Add(b);
-        }
-        var clear = new Button { Text = "Default", AutoSize = true };
-        clear.Click += (_, _) => _userAgent.Clear();
-        uaButtons.Controls.Add(clear);
-
         _language.Items.AddRange(Languages.Cast<object>().ToArray());
 
         var size = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
@@ -166,9 +323,8 @@ public class ProfileForm : Form
         size.Controls.Add(_height);
 
         var grid = NewGrid();
-        AddRow(grid, "User agent", _userAgent, "Leave empty to use the browser's real user agent (most consistent). " +
-                                               "A non-Windows UA on Windows can be detected by sites that check other signals.");
-        AddRow(grid, "", uaButtons);
+        AddRow(grid, "Custom user agent", _userAgent, "Leave empty (recommended): it's generated from the Fingerprint platform " +
+                                                      "and your installed browser version, so everything stays consistent.");
         AddRow(grid, "Language", _language, "Browser UI and Accept-Language, e.g. en-US. Empty = system default.");
         AddRow(grid, "Window size", size, "0 × 0 = browser default.");
         AddRow(grid, "WebRTC", _blockWebRtc);
@@ -197,6 +353,7 @@ public class ProfileForm : Form
         _blockWebRtc.Checked = p.BlockWebRtcLeak;
         _extraArgs.Text = ToWindowsLines(p.ExtraArgs);
         UpdateProxyEnabled();
+        LoadFingerprintControls();
     }
 
     private void SaveTo(Profile p)
@@ -227,6 +384,8 @@ public class ProfileForm : Form
             error = "Enter a profile name.";
         else if (_proxyType.SelectedIndex > 0 && (string.IsNullOrWhiteSpace(_proxyHost.Text) || _proxyPort.Value == 0))
             error = "Enter the proxy host and port, or set the proxy type to \"No proxy\".";
+        else
+            error = ReadFingerprintControls();
 
         if (error != null)
         {
@@ -235,6 +394,7 @@ public class ProfileForm : Form
             return;
         }
         SaveTo(_profile);
+        _profile.Fingerprint = _fp.Copy();
     }
 
     private void UpdateProxyEnabled()

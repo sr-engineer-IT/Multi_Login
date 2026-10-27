@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using MultiLogin.Models;
 
 namespace MultiLogin.Services;
 
@@ -8,15 +9,6 @@ namespace MultiLogin.Services;
 /// </summary>
 public static class UserAgents
 {
-    private static readonly string[] Platforms =
-    {
-        "Windows NT 10.0; Win64; x64",
-        "Macintosh; Intel Mac OS X 10_15_7",
-        "X11; Linux x86_64"
-    };
-
-    public static string[] PlatformNames { get; } = { "Windows", "macOS", "Linux" };
-
     public static int GetMajorVersion(string browserPath)
     {
         try
@@ -28,6 +20,24 @@ public static class UserAgents
         return 140;
     }
 
-    public static string Build(int platformIndex, int majorVersion) =>
-        $"Mozilla/5.0 ({Platforms[platformIndex]}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{majorVersion}.0.0.0 Safari/537.36";
+    public static bool IsEdge(string browserPath) =>
+        Path.GetFileName(browserPath).Equals("msedge.exe", StringComparison.OrdinalIgnoreCase);
+
+    public static string Build(string platform, int majorVersion, bool edge = false)
+    {
+        var os = platform switch
+        {
+            Fingerprint.MacOS => "Macintosh; Intel Mac OS X 10_15_7",
+            Fingerprint.Linux => "X11; Linux x86_64",
+            _ => "Windows NT 10.0; Win64; x64"
+        };
+        var ua = $"Mozilla/5.0 ({os}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{majorVersion}.0.0.0 Safari/537.36";
+        return edge ? $"{ua} Edg/{majorVersion}.0.0.0" : ua;
+    }
+
+    public static string? DetectPlatform(string userAgent) =>
+        userAgent.Contains("Windows") ? Fingerprint.Windows
+        : userAgent.Contains("Mac OS X") ? Fingerprint.MacOS
+        : userAgent.Contains("Linux") ? Fingerprint.Linux
+        : null;
 }
