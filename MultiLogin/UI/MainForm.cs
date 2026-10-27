@@ -14,7 +14,9 @@ public class MainForm : Form
     private readonly ToolStripStatusLabel _status = new() { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
     private readonly ToolStripStatusLabel _browserLabel = new();
 
-    private readonly ToolStripButton _btnLaunch, _btnStop, _btnEdit, _btnClone, _btnDelete, _btnFolder;
+    private readonly ToolStripButton _btnLaunch, _btnStop, _btnEdit, _btnClone, _btnDelete, _btnFolder, _btnCheckAll;
+    private readonly HashSet<string> _checkedIds = new();
+    private bool _refreshing, _suppressCheck;
 
     public MainForm()
     {
@@ -38,12 +40,13 @@ public class MainForm : Form
         _btnFolder = Button("📁  Data folder", (_, _) => OpenDataFolder());
         var btnExport = Button("⇩  Export", (_, _) => ExportProfiles());
         var btnImport = Button("⇧  Import", (_, _) => ImportProfiles());
+        _btnCheckAll = Button("☑  Check all", (_, _) => ToggleCheckAll());
         var btnSettings = Button("⚙  Settings", (_, _) => OpenSettings());
         btnSettings.Alignment = ToolStripItemAlignment.Right;
         _search.TextChanged += (_, _) => RefreshList();
         toolbar.Items.AddRange(new ToolStripItem[]
         {
-            btnNew, new ToolStripSeparator(), _btnLaunch, _btnStop, new ToolStripSeparator(),
+            btnNew, _btnCheckAll, new ToolStripSeparator(), _btnLaunch, _btnStop, new ToolStripSeparator(),
             _btnEdit, _btnClone, _btnDelete, new ToolStripSeparator(),
             btnExport, btnImport, new ToolStripSeparator(),
             new ToolStripLabel("Search:"), _search, btnSettings, _btnFolder
@@ -56,15 +59,22 @@ public class MainForm : Form
         _list.GridLines = false;
         _list.HideSelection = false;
         _list.BorderStyle = BorderStyle.None;
-        _list.Columns.Add("Status", 90);
+        _list.CheckBoxes = true;
+        _list.Columns.Add("Status", 110);
         _list.Columns.Add("Name", 220);
         _list.Columns.Add("Tags", 140);
         _list.Columns.Add("Proxy", 220);
         _list.Columns.Add("Fingerprint", 150);
         _list.Columns.Add("Notes", 200);
         _list.Columns.Add("Last launched", 140);
-        _list.DoubleClick += (_, _) => LaunchSelected();
+        _list.DoubleClick += (_, _) => LaunchSelected(SelectedProfiles);
+        _list.MouseDown += (_, e) => _suppressCheck = e.Clicks > 1;
+        _list.MouseUp += (_, _) => _suppressCheck = false;
+        _list.ItemCheck += (_, e) => { if (_suppressCheck) e.NewValue = e.CurrentValue; };
         _list.SelectedIndexChanged += (_, _) => UpdateButtons();
+        _list.ItemChecked += OnItemChecked;
+        // Clicking the first column header checks or unchecks every visible profile.
+        _list.ColumnClick += (_, e) => { if (e.Column == 0) ToggleCheckAll(); };
         _list.KeyDown += OnListKeyDown;
         _list.ContextMenuStrip = BuildContextMenu();
 
@@ -118,12 +128,48 @@ public class MainForm : Form
         e.Handled = true;
     }
 
+    /// <summary>Highlighted rows; used by single-profile actions like Edit and Clone.</summary>
     private List<Profile> SelectedProfiles =>
         _list.SelectedItems.Cast<ListViewItem>().Select(i => (Profile)i.Tag!).ToList();
+
+    /// <summary>What bulk actions (Launch, Stop, Delete, Export) apply to: the checked profiles if any, else the highlighted rows.</summary>
+    private List<Profile> TargetProfiles
+    {
+        get
+        {
+            var checkedItems = _list.CheckedItems.Cast<ListViewItem>().Select(i => (Profile)i.Tag!).ToList();
+            return checkedItems.Count > 0 ? checkedItems : SelectedProfiles;
+        }
+    }
+
+    private void OnItemChecked(object? sender, ItemCheckedEventArgs e)
+    {
+        if (_refreshing) return;
+        var id = ((Profile)e.Item.Tag!).Id;
+        if (e.Item.Checked) _checkedIds.Add(id); else _checkedIds.Remove(id);
+        UpdateButtons();
+    }
+
+    private void ToggleCheckAll()
+    {
+        var items = _list.Items.Cast<ListViewItem>().ToList();
+        var check = items.Any(i => !i.Checked);
+        _refreshing = true;
+        foreach (var item in items)
+        {
+            item.Checked = check;
+            var id = ((Profile)item.Tag!).Id;
+            if (check) _checkedIds.Add(id); else _checkedIds.Remove(id);
+        }
+        _refreshing = false;
+        UpdateButtons();
+    }
 
     private void RefreshList()
     {
         var selectedIds = SelectedProfiles.Select(p => p.Id).ToHashSet();
+        _checkedIds.IntersectWith(_store.Profiles.Select(p => p.Id));
+        _refreshing = true;
         var filter = _search.Text.Trim();
 
         _list.BeginUpdate();
@@ -144,11 +190,11 @@ public class MainForm : Form
             item.SubItems.Add(p.LastLaunchedUtc?.ToLocalTime().ToString("g") ?? "Never");
             if (running) item.ForeColor = Color.SeaGreen;
             item.Selected = selectedIds.Contains(p.Id);
+            item.Checked = _checkedIds.Contains(p.Id);
             _list.Items.Add(item);
         }
         _list.EndUpdate();
-
-        _status.Text = $"{_store.Profiles.Count} profiles  ·  {_launcher.RunningCount} running";
+        _refreshing = false;
         UpdateButtons();
     }
 
@@ -160,13 +206,20 @@ public class MainForm : Form
 
     private void UpdateButtons()
     {
-        var sel = SelectedProfiles;
-        var any = sel.Count > 0;
-        _btnLaunch.Enabled = sel.Any(p => !_launcher.IsRunning(p.Id));
-        _btnStop.Enabled = sel.Any(p => _launcher.IsRunning(p.Id));
-        _btnEdit.Enabled = sel.Count == 1;
-        _btnClone.Enabled = sel.Count == 1;
-        _btnDelete.Enabled = any;
+        var targets = TargetProfiles;
+        var toLaunch = targets.Count(p => !_launcher.IsRunning(p.Id));
+        var toStop = targets.Count(p => _launcher.IsRunning(p.Id));
+        _btnLaunch.Enabled = toLaunch > 0;
+        _btnLaunch.Text = toLaunch > 1 ? $"▶  Launch ({toLaunch})" : "▶  Launch";
+        _btnStop.Enabled = toStop > 0;
+        _btnStop.Text = toStop > 1 ? $"■  Stop ({toStop})" : "■  Stop";
+        _btnDelete.Enabled = targets.Count > 0;
+        _btnEdit.Enabled = _btnClone.Enabled = SelectedProfiles.Count == 1;
+
+        var visible = _list.Items.Count;
+        _btnCheckAll.Text = visible > 0 && _list.CheckedItems.Count == visible ? "☐  Uncheck all" : "☑  Check all";
+        var checkedText = _list.CheckedItems.Count > 0 ? $"  ·  {_list.CheckedItems.Count} checked" : "";
+        _status.Text = $"{_store.Profiles.Count} profiles  ·  {_launcher.RunningCount} running{checkedText}";
     }
 
     private void UpdateBrowserLabel()
@@ -207,7 +260,7 @@ public class MainForm : Form
 
     private void DeleteSelected()
     {
-        var sel = SelectedProfiles;
+        var sel = TargetProfiles;
         if (sel.Count == 0) return;
         if (sel.Any(p => _launcher.IsRunning(p.Id)))
         {
@@ -227,9 +280,9 @@ public class MainForm : Form
         RefreshList();
     }
 
-    private async void LaunchSelected()
+    private async void LaunchSelected(List<Profile>? only = null)
     {
-        var toLaunch = SelectedProfiles.Where(p => !_launcher.IsRunning(p.Id)).ToList();
+        var toLaunch = (only ?? TargetProfiles).Where(p => !_launcher.IsRunning(p.Id)).ToList();
         if (toLaunch.Count == 0) return;
 
         var launches = toLaunch.Select(LaunchOneAsync).ToList();
@@ -247,7 +300,7 @@ public class MainForm : Form
 
     private async Task StopSelected()
     {
-        await Task.WhenAll(SelectedProfiles.Select(p => _launcher.StopAsync(p.Id)));
+        await Task.WhenAll(TargetProfiles.Select(p => _launcher.StopAsync(p.Id)));
         RefreshList();
     }
 
@@ -272,7 +325,8 @@ public class MainForm : Form
     /// <summary>Exports the selected profiles, or all of them when none are selected.</summary>
     private void ExportProfiles()
     {
-        var profiles = SelectedProfiles.Count > 0 ? SelectedProfiles : _store.Profiles.ToList();
+        var targets = TargetProfiles;
+        var profiles = targets.Count > 0 ? targets : _store.Profiles.ToList();
         if (profiles.Count == 0) return;
 
         using var save = new SaveFileDialog
