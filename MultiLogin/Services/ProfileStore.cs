@@ -7,7 +7,7 @@ namespace MultiLogin.Services;
 /// <summary>Persists profiles and settings as JSON under %LOCALAPPDATA%\MultiLogin.</summary>
 public class ProfileStore
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    internal static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
         Converters = { new JsonStringEnumConverter() }

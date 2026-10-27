@@ -190,8 +190,14 @@ public class ProfileForm : Form
         _fpMemory.Items.AddRange(Fingerprint.MemoryChoices.Cast<object>().ToArray());
         _fpEnabled.CheckedChanged += (_, _) => UpdateFingerprintEnabled();
 
-        var randomize = new Button { Text = "🎲  New random fingerprint", AutoSize = true };
+        var randomize = new Button { Text = "New random fingerprint", AutoSize = true };
         randomize.Click += (_, _) => Randomize(keepSeed: false);
+        var copyCode = new Button { Text = "Copy code", AutoSize = true };
+        copyCode.Click += (_, _) => CopyFingerprintCode();
+        var pasteCode = new Button { Text = "Paste code", AutoSize = true };
+        pasteCode.Click += (_, _) => PasteFingerprintCode();
+        var fpButtons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+        fpButtons.Controls.AddRange(new Control[] { randomize, copyCode, pasteCode });
 
         var hw = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
         hw.Controls.Add(new Label { Text = "CPU cores", AutoSize = true, Margin = new Padding(0, 7, 6, 0) });
@@ -212,9 +218,9 @@ public class ProfileForm : Form
         AddRow(grid, "GPU", _fpGpu);
         AddRow(grid, "Protection", noise, "Noise makes Canvas/audio hashes unique per profile but stable across launches. " +
                                           "It's done by script injection, which advanced anti-bot systems can sometimes detect.");
-        AddRow(grid, "", randomize);
+        AddRow(grid, "", fpButtons, "Copy code / Paste code move this exact fingerprint to a profile on another computer.");
 
-        _fpControls.AddRange(new Control[] { _fpPlatform, _fpTimezone, _fpGeo, hw, _fpScreen, _fpGpu, noise, randomize });
+        _fpControls.AddRange(new Control[] { _fpPlatform, _fpTimezone, _fpGeo, hw, _fpScreen, _fpGpu, noise, randomize, pasteCode });
 
         var page = new TabPage("Fingerprint");
         page.Controls.Add(grid);
@@ -234,6 +240,32 @@ public class ProfileForm : Form
         _fp.WebGlVendor = fresh.WebGlVendor;
         _fp.WebGlRenderer = fresh.WebGlRenderer;
         if (!keepSeed) _fp.NoiseSeed = fresh.NoiseSeed;
+        LoadFingerprintControls();
+    }
+
+    private void CopyFingerprintCode()
+    {
+        var error = ReadFingerprintControls();
+        if (error != null)
+        {
+            MessageBox.Show(this, error, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        Clipboard.SetText(ProfileTransfer.ToFingerprintCode(_fp));
+        MessageBox.Show(this, "Fingerprint code copied. Paste it into a profile on the other computer.",
+            Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private void PasteFingerprintCode()
+    {
+        var fp = Clipboard.ContainsText() ? ProfileTransfer.FromFingerprintCode(Clipboard.GetText()) : null;
+        if (fp == null)
+        {
+            MessageBox.Show(this, "The clipboard doesn't contain a fingerprint code. Use \"Copy code\" on the other computer first.",
+                Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+        _fp = fp;
         LoadFingerprintControls();
     }
 

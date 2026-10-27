@@ -36,6 +36,8 @@ public class MainForm : Form
         _btnClone = Button("⧉  Clone", (_, _) => CloneSelected());
         _btnDelete = Button("🗑  Delete", (_, _) => DeleteSelected());
         _btnFolder = Button("📁  Data folder", (_, _) => OpenDataFolder());
+        var btnExport = Button("⇩  Export", (_, _) => ExportProfiles());
+        var btnImport = Button("⇧  Import", (_, _) => ImportProfiles());
         var btnSettings = Button("⚙  Settings", (_, _) => OpenSettings());
         btnSettings.Alignment = ToolStripItemAlignment.Right;
         _search.TextChanged += (_, _) => RefreshList();
@@ -43,6 +45,7 @@ public class MainForm : Form
         {
             btnNew, new ToolStripSeparator(), _btnLaunch, _btnStop, new ToolStripSeparator(),
             _btnEdit, _btnClone, _btnDelete, new ToolStripSeparator(),
+            btnExport, btnImport, new ToolStripSeparator(),
             new ToolStripLabel("Search:"), _search, btnSettings, _btnFolder
         });
         _btnFolder.Alignment = ToolStripItemAlignment.Right;
@@ -264,6 +267,93 @@ public class MainForm : Form
         var dir = _store.GetUserDataDir(profile);
         Directory.CreateDirectory(dir);
         Process.Start("explorer.exe", dir);
+    }
+
+    /// <summary>Exports the selected profiles, or all of them when none are selected.</summary>
+    private void ExportProfiles()
+    {
+        var profiles = SelectedProfiles.Count > 0 ? SelectedProfiles : _store.Profiles.ToList();
+        if (profiles.Count == 0) return;
+
+        using var save = new SaveFileDialog
+        {
+            Filter = ProfileTransfer.FileFilter,
+            FileName = profiles.Count == 1 ? $"{profiles[0].Name}.mlprofiles" : $"profiles-{DateTime.Now:yyyy-MM-dd}.mlprofiles"
+        };
+        if (save.ShowDialog(this) != DialogResult.OK) return;
+
+        using var pw = new PasswordForm("Protect export",
+            "Choose a password for this file. It's needed to import it, and lets proxy passwords be included.",
+            confirmMode: true);
+        if (pw.ShowDialog(this) != DialogResult.OK) return;
+
+        try
+        {
+            ProfileTransfer.Export(profiles, save.FileName, pw.Password);
+            _status.Text = $"Exported {profiles.Count} profile(s) to {Path.GetFileName(save.FileName)}";
+        }
+        catch (Exception ex)
+        {
+            ShowError($"Export failed: {ex.Message}");
+        }
+    }
+
+    private void ImportProfiles()
+    {
+        using var open = new OpenFileDialog { Filter = ProfileTransfer.FileFilter };
+        if (open.ShowDialog(this) != DialogResult.OK) return;
+
+        List<Profile> imported;
+        try
+        {
+            string? password = null;
+            if (ProfileTransfer.IsEncrypted(open.FileName))
+            {
+                using var pw = new PasswordForm("Import profiles", "This file is protected. Enter its password.", confirmMode: false);
+                if (pw.ShowDialog(this) != DialogResult.OK) return;
+                password = pw.Password;
+            }
+            imported = ProfileTransfer.Import(open.FileName, password);
+        }
+        catch (Exception ex)
+        {
+            ShowError($"Import failed: {ex.Message}");
+            return;
+        }
+
+        var added = 0;
+        foreach (var p in imported)
+        {
+            var existing = _store.Profiles.FirstOrDefault(x => x.Id == p.Id);
+            if (existing != null)
+            {
+                var answer = MessageBox.Show(this,
+                    $"\"{existing.Name}\" already exists here.\n\n" +
+                    "Yes = replace its settings (keeps its browser data)\nNo = import as a separate profile\nCancel = skip",
+                    "Import profiles", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                if (answer == DialogResult.Cancel) continue;
+                if (answer == DialogResult.Yes)
+                {
+                    if (_launcher.IsRunning(existing.Id))
+                    {
+                        ShowError($"Stop \"{existing.Name}\" before replacing it.");
+                        continue;
+                    }
+                    p.LastLaunchedUtc = existing.LastLaunchedUtc;
+                    _store.Profiles[_store.Profiles.IndexOf(existing)] = p;
+                    added++;
+                    continue;
+                }
+                // Separate profile: new ID (own browser data folder), same fingerprint.
+                p.Id = Guid.NewGuid().ToString("N");
+            }
+            _store.Profiles.Add(p);
+            added++;
+        }
+
+        _store.Save();
+        RefreshList();
+        _status.Text = $"Imported {added} profile(s)";
     }
 
     private void OpenDataFolder() => Process.Start("explorer.exe", _store.DataDir);
