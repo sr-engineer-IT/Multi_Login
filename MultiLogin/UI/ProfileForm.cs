@@ -38,9 +38,11 @@ public class ProfileForm : Form
     private readonly ComboBox _fpTimezone = new() { DropDownStyle = ComboBoxStyle.DropDown };
     private readonly CheckBox _fpGeo = new() { Text = "Report the proxy IP's location to sites that ask for it", AutoSize = true };
     private readonly ComboBox _fpCores = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
-    private readonly ComboBox _fpMemory = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
+    private readonly ComboBox _fpMemory = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 130, FormattingEnabled = true };
     private readonly ComboBox _fpScreen = new() { DropDownStyle = ComboBoxStyle.DropDown, Width = 140 };
-    private readonly ComboBox _fpGpu = new() { DropDownStyle = ComboBoxStyle.DropDownList };
+    // Editable: pick a listed CPU or type any name.
+    private readonly ComboBox _fpCpu = new() { DropDownStyle = ComboBoxStyle.DropDown, MaxDropDownItems = 20 };
+    private Label _fpCpuHint = null!;
     private readonly CheckBox _fpCanvas = new() { Text = "Canvas noise", AutoSize = true };
     private readonly CheckBox _fpAudio = new() { Text = "Audio noise", AutoSize = true };
     private readonly CheckBox _fpWebGl = new() { Text = "WebGL / WebGPU vendor", AutoSize = true };
@@ -117,21 +119,22 @@ public class ProfileForm : Form
         return grid;
     }
 
-    private static void AddRow(TableLayoutPanel grid, string label, Control control, string? hint = null)
+    /// <summary>Adds a labelled row. Returns the hint label, if any, so it can be updated later.</summary>
+    private static Label? AddRow(TableLayoutPanel grid, string label, Control control, string? hint = null)
     {
         control.Dock = control is NumericUpDown or CheckBox or Button or FlowLayoutPanel ? DockStyle.None : DockStyle.Fill;
         control.Margin = new Padding(3, 4, 3, hint == null ? 4 : 0);
         grid.Controls.Add(new Label { Text = label, AutoSize = true, Margin = new Padding(3, 8, 3, 3) });
         grid.Controls.Add(control);
-        if (hint != null)
+        if (hint == null) return null;
+        var hintLabel = new Label
         {
-            grid.Controls.Add(new Label());
-            grid.Controls.Add(new Label
-            {
-                Text = hint, AutoSize = true, MaximumSize = new Size(460, 0),
-                ForeColor = SystemColors.GrayText, Margin = new Padding(3, 0, 3, 8)
-            });
-        }
+            Text = hint, AutoSize = true, MaximumSize = new Size(460, 0),
+            ForeColor = SystemColors.GrayText, Margin = new Padding(3, 0, 3, 8)
+        };
+        grid.Controls.Add(new Label());
+        grid.Controls.Add(hintLabel);
+        return hintLabel;
     }
 
     private TabPage BuildGeneralTab()
@@ -182,12 +185,20 @@ public class ProfileForm : Form
         _fpPlatform.SelectedIndexChanged += (_, _) =>
         {
             if (_loading) return;
-            // Screen sizes and GPUs differ per platform, so re-roll them to stay consistent.
+            // Screen sizes and CPUs differ per platform, so re-roll them to stay consistent.
             Randomize(keepSeed: true);
         };
+        _fpCpu.SelectedIndexChanged += (_, _) => OnCpuChanged();
+        _fpCpu.TextChanged += (_, _) => OnCpuChanged();
         _fpTimezone.Items.AddRange(Timezones.Cast<object>().ToArray());
         _fpCores.Items.AddRange(Fingerprint.CpuChoices.Cast<object>().ToArray());
         _fpMemory.Items.AddRange(Fingerprint.MemoryChoices.Cast<object>().ToArray());
+        // Items stay ints; only the displayed text shows what sites will actually read.
+        _fpMemory.Format += (_, e) =>
+        {
+            if (e.ListItem is int gb && gb > Fingerprint.MaxReportedMemory)
+                e.Value = $"{gb}  (sites see {Fingerprint.MaxReportedMemory})";
+        };
         _fpEnabled.CheckedChanged += (_, _) => UpdateFingerprintEnabled();
 
         var randomize = new Button { Text = "New random fingerprint", AutoSize = true };
@@ -213,14 +224,15 @@ public class ProfileForm : Form
         AddRow(grid, "Platform", _fpPlatform, "Sets the user agent, client hints and navigator.platform to match.");
         AddRow(grid, "Timezone", _fpTimezone, "Auto matches the proxy's IP. Without a proxy, your real timezone is kept.");
         AddRow(grid, "Geolocation", _fpGeo);
-        AddRow(grid, "Hardware", hw);
+        _fpCpuHint = AddRow(grid, "CPU", _fpCpu, " ")!;
+        AddRow(grid, "Hardware", hw, "Chrome never tells sites more than 8 GB of memory, so 16–64 GB are reported " +
+                                     "as 8, exactly like a real computer with that much memory.");
         AddRow(grid, "Screen", _fpScreen);
-        AddRow(grid, "GPU", _fpGpu);
         AddRow(grid, "Protection", noise, "Noise makes Canvas/audio hashes unique per profile but stable across launches. " +
                                           "It's done by script injection, which advanced anti-bot systems can sometimes detect.");
         AddRow(grid, "", fpButtons, "Copy code / Paste code move this exact fingerprint to a profile on another computer.");
 
-        _fpControls.AddRange(new Control[] { _fpPlatform, _fpTimezone, _fpGeo, hw, _fpScreen, _fpGpu, noise, randomize, pasteCode });
+        _fpControls.AddRange(new Control[] { _fpPlatform, _fpTimezone, _fpGeo, _fpCpu, hw, _fpScreen, noise, randomize, pasteCode });
 
         var page = new TabPage("Fingerprint");
         page.Controls.Add(grid);
@@ -237,6 +249,7 @@ public class ProfileForm : Form
         _fp.DeviceMemory = fresh.DeviceMemory;
         _fp.ScreenWidth = fresh.ScreenWidth;
         _fp.ScreenHeight = fresh.ScreenHeight;
+        _fp.CpuModel = fresh.CpuModel;
         _fp.WebGlVendor = fresh.WebGlVendor;
         _fp.WebGlRenderer = fresh.WebGlRenderer;
         if (!keepSeed) _fp.NoiseSeed = fresh.NoiseSeed;
@@ -283,10 +296,10 @@ public class ProfileForm : Form
         _fpScreen.Items.AddRange(Fingerprint.ScreensFor(_fp.Platform).Distinct().Select(s => (object)$"{s.W}×{s.H}").ToArray());
         _fpScreen.Text = $"{_fp.ScreenWidth}×{_fp.ScreenHeight}";
 
-        _fpGpu.Items.Clear();
-        _fpGpu.Items.AddRange(Fingerprint.GpusFor(_fp.Platform).Select(g => (object)g.Renderer).ToArray());
-        if (!_fpGpu.Items.Contains(_fp.WebGlRenderer)) _fpGpu.Items.Add(_fp.WebGlRenderer);
-        _fpGpu.SelectedItem = _fp.WebGlRenderer;
+        _fpCpu.Items.Clear();
+        _fpCpu.Items.AddRange(Fingerprint.CpusFor(_fp.Platform).Select(c => (object)c.Name).ToArray());
+        _fpCpu.Text = _fp.CpuModel;
+        OnCpuChanged();
 
         _fpCanvas.Checked = _fp.CanvasNoise;
         _fpAudio.Checked = _fp.AudioNoise;
@@ -319,12 +332,9 @@ public class ProfileForm : Form
         else if (_fp.Enabled)
             return "Enter the screen size as width×height, e.g. 1920×1080.";
 
-        if (_fpGpu.SelectedItem is string renderer)
-        {
-            _fp.WebGlRenderer = renderer;
-            var known = Fingerprint.Platforms.SelectMany(Fingerprint.GpusFor).FirstOrDefault(g => g.Renderer == renderer);
-            if (known.Vendor != null) _fp.WebGlVendor = known.Vendor;
-        }
+        // A listed CPU sets its own thread count; a typed one keeps the cores box.
+        // An empty CPU (profiles from before CPUs existed) keeps the graphics it already had.
+        _fp.ApplyCpu(_fpCpu.Text);
         _fp.CanvasNoise = _fpCanvas.Checked;
         _fp.AudioNoise = _fpAudio.Checked;
         _fp.WebGlSpoof = _fpWebGl.Checked;
@@ -332,6 +342,45 @@ public class ProfileForm : Form
         if (_fp.Enabled && _fp.Timezone.Length > 0 && !IsValidTimezone(_fp.Timezone))
             return $"\"{_fp.Timezone}\" isn't a known timezone. Use an IANA name like Europe/Berlin, or Auto.";
         return null;
+    }
+
+    private string CurrentPlatform => (string?)_fpPlatform.SelectedItem ?? Fingerprint.Windows;
+
+    /// <summary>
+    /// A listed CPU fixes the core count to its real thread count (a mismatch, like a Celeron
+    /// with 32 cores, is a giveaway), so the cores box is only editable for a typed CPU name.
+    /// </summary>
+    private void OnCpuChanged()
+    {
+        if (_fpCpuHint == null) return;
+        var cpu = Fingerprint.FindCpu(CurrentPlatform, _fpCpu.Text, out var known);
+        if (cpu != null && known) SelectOrAdd(_fpCores, cpu.Threads);
+        _fpCores.Enabled = !known;
+
+        var graphics = cpu != null ? GraphicsName(cpu.GlRenderer) : GraphicsName(_fp.WebGlRenderer);
+        _fpCpuHint.Text = "Pick one or type your own CPU name. Its built-in graphics are what sites see, " +
+                          "so no graphics card is needed.\n" +
+                          $"Graphics reported: {graphics}" +
+                          (known ? "  ·  Cores set by this CPU"
+                              : cpu != null ? $"  (closest match for a {BrandOf(cpu)} CPU — set the cores yourself)" : "");
+    }
+
+    private static string BrandOf(Fingerprint.Cpu cpu) =>
+        cpu.GlVendor.Contains("Apple") ? "Apple" : cpu.GlVendor.Contains("AMD") ? "AMD" : "Intel";
+
+    /// <summary>"ANGLE (Intel, Intel(R) UHD Graphics 630 (0x00009BC8) Direct3D11 …)" → "Intel(R) UHD Graphics 630".</summary>
+    private static string GraphicsName(string renderer)
+    {
+        var s = renderer.StartsWith("ANGLE (", StringComparison.Ordinal) ? renderer[7..] : renderer;
+        var comma = s.IndexOf(", ", StringComparison.Ordinal);
+        if (comma >= 0) s = s[(comma + 2)..];
+        s = s.Replace("ANGLE Metal Renderer: ", "");
+        foreach (var cut in new[] { " (0x", ", Unspecified", ", OpenGL", " (radeonsi", "/PCIe" })
+        {
+            var i = s.IndexOf(cut, StringComparison.Ordinal);
+            if (i > 0) s = s[..i];
+        }
+        return s.Length > 0 ? s : "—";
     }
 
     private static bool IsValidTimezone(string iana)

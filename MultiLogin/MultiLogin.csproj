@@ -9,10 +9,12 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <AssemblyTitle>Multi Login</AssemblyTitle>
     <Product>Multi Login</Product>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="Services\fingerprint.js" LogicalName="MultiLogin.fingerprint.js" />
+    <EmbeddedResource Include="Assets\app.ico" LogicalName="MultiLogin.app.ico" />
   </ItemGroup>
 
 </Project>

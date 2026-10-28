@@ -319,7 +319,7 @@ public sealed class FingerprintInjector : IAsyncDisposable
         {
             ["seed"] = fp.NoiseSeed,
             ["cores"] = fp.HardwareConcurrency,
-            ["memory"] = fp.DeviceMemory,
+            ["memory"] = Math.Min(fp.DeviceMemory, Fingerprint.MaxReportedMemory),
             ["navPlatform"] = NavigatorPlatform(ctx.Platform),
             ["screenW"] = fp.ScreenWidth,
             ["screenH"] = fp.ScreenHeight,
@@ -353,8 +353,20 @@ public sealed class FingerprintInjector : IAsyncDisposable
         if (renderer.Contains("NVIDIA"))
             return ("nvidia", renderer.Contains("RTX 40") ? "lovelace" : renderer.Contains("RTX 30") ? "ampere" : "turing");
         if (renderer.Contains("Intel"))
-            return ("intel", renderer.Contains("Xe") || renderer.Contains("770") ? "gen-12lp" : "gen-9");
-        if (renderer.Contains("AMD")) return ("amd", renderer.Contains("RX 6") ? "rdna-2" : "");
+        {
+            if (renderer.Contains("Arc")) return ("intel", "xe-lpg");
+            string[] gen12 = { "Xe", "730", "770", "ADL", "0x000046", "0x0000A7", "0x00009A" };
+            return ("intel", gen12.Any(renderer.Contains) ? "gen-12lp" : "gen-9");
+        }
+        if (renderer.Contains("AMD"))
+        {
+            string[] rdna3 = { "760M", "780M", "890M", "gfx1103" };
+            string[] rdna2 = { "RX 6", "610M", "0x0000164E", "0x000013C0", "raphael" };
+            string[] gcn5 = { "Vega", "0x00001636", "0x00001638", "renoir" };
+            return ("amd", rdna3.Any(renderer.Contains) ? "rdna-3"
+                : rdna2.Any(renderer.Contains) ? "rdna-2"
+                : gcn5.Any(renderer.Contains) ? "gcn-5" : "");
+        }
         return ("", "");
     }
 

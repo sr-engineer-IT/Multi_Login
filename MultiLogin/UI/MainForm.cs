@@ -21,6 +21,7 @@ public class MainForm : Form
     public MainForm()
     {
         Text = "Multi Login";
+        Icon = AppIcon();
         Width = 1250;
         Height = 650;
         StartPosition = FormStartPosition.CenterScreen;
@@ -440,4 +441,11 @@ public class MainForm : Form
 
     private void ShowError(string message) =>
         MessageBox.Show(this, message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+
+    /// <summary>Title-bar / taskbar icon. The exe's own icon comes from ApplicationIcon in the .csproj.</summary>
+    private static Icon AppIcon()
+    {
+        using var stream = typeof(MainForm).Assembly.GetManifestResourceStream("MultiLogin.app.ico")!;
+        return new Icon(stream);
+    }
 }
