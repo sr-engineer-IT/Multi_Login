@@ -225,8 +225,8 @@ public class ProfileForm : Form
         AddRow(grid, "Timezone", _fpTimezone, "Auto matches the proxy's IP. Without a proxy, your real timezone is kept.");
         AddRow(grid, "Geolocation", _fpGeo);
         _fpCpuHint = AddRow(grid, "CPU", _fpCpu, " ")!;
-        AddRow(grid, "Hardware", hw, "Chrome never tells sites more than 8 GB of memory, so 16–64 GB are reported " +
-                                     "as 8, exactly like a real computer with that much memory.");
+        AddRow(grid, "Hardware", hw, $"Chrome never tells sites more than {Fingerprint.MaxReportedMemory} GB of memory, so 64 GB " +
+                                     $"is reported as {Fingerprint.MaxReportedMemory}, exactly like a real computer with that much memory.");
         AddRow(grid, "Screen", _fpScreen);
         AddRow(grid, "Protection", noise, "Noise makes Canvas/audio hashes unique per profile but stable across launches. " +
                                           "It's done by script injection, which advanced anti-bot systems can sometimes detect.");

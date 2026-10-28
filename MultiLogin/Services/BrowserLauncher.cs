@@ -221,6 +221,9 @@ public class BrowserLauncher
         yield return $"--user-data-dir={userDataDir}";
         yield return "--no-first-run";
         yield return "--no-default-browser-check";
+        // Chrome sync uploads the real computer name (e.g. DESKTOP-7F3K2A) to the Google account's
+        // device list. Without sync, Google only sees "Windows · Chrome", like a plain web sign-in.
+        yield return "--disable-sync";
 
         if (forwarder != null)
             yield return $"--proxy-server={forwarder.LocalProxyUrl}";
@@ -249,6 +252,9 @@ public class BrowserLauncher
             // Debugging port 0 = pick a free port; Chrome writes it to DevToolsActivePort.
             // Start on the new-tab page: the real start pages open only once overrides are in place.
             yield return "--remote-debugging-port=0";
+            // Chrome sets navigator.webdriver = true whenever the debugging port is open, which tells
+            // every site (Google, LinkedIn, ...) the browser is robot-controlled. This keeps it false.
+            yield return "--disable-blink-features=AutomationControlled";
             yield return "chrome://newtab/";
         }
         else

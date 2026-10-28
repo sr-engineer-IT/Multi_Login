@@ -4,17 +4,6 @@
   const cfg = /*CONFIG*/;
   const g = globalThis;
 
-  // Google's sign-in page inspects built-in functions and refuses browsers where they've been
-  // replaced ("This browser or app may not be secure"). Leave its pages and the frames inside
-  // them untouched; the UA, client hints, timezone, language and CPU overrides made over
-  // DevTools still apply there, since those happen inside the browser itself.
-  const loc = g.location;
-  if (loc) {
-    const signInHost = h => h === 'accounts.google.com';
-    const ancestors = Array.from(loc.ancestorOrigins || [], o => { try { return new URL(o).hostname; } catch { return ''; } });
-    if (signInHost(loc.hostname) || ancestors.some(signInHost)) return;
-  }
-
   // ---- Make patched functions look native ---------------------------------------------
   const nativeToString = Function.prototype.toString;
   const masked = new WeakMap();

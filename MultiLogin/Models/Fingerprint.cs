@@ -51,8 +51,11 @@ public class Fingerprint
     public static readonly int[] CpuChoices = { 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 28, 32 };
     public static readonly int[] MemoryChoices = { 2, 4, 8, 16, 32, 64 };
 
-    /// <summary>Chrome caps navigator.deviceMemory at 8 GB, so a real 16–64 GB machine also reports 8.</summary>
-    public const int MaxReportedMemory = 8;
+    /// <summary>
+    /// Desktop Chrome caps navigator.deviceMemory at 32 GB (raised from 8 in 2026), so a real
+    /// 64 GB machine reports 32.
+    /// </summary>
+    public const int MaxReportedMemory = 32;
 
     private static readonly (int W, int H)[] WindowsScreens =
         { (1920, 1080), (1920, 1080), (1920, 1080), (1366, 768), (1536, 864), (2560, 1440), (1600, 900), (1440, 900), (1680, 1050), (1920, 1200) };
